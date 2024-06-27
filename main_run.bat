@@ -1,1 +1,0 @@
-conda activate jfix & python main_stripMMfilePolscope.py
