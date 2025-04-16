@@ -5,11 +5,44 @@ import os
 import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter.filedialog import askdirectory
-from utils import estimate_background
 from dataclasses import dataclass
 from typing import Dict, Tuple, Optional, List
 from pathlib import Path
 import tifffile
+
+def estimate_background(img: np.ndarray, 
+                       preset_indices: Optional[np.ndarray] = None,
+                       window_shape: Tuple[int, int, int] = (16, 16, 3),
+                       step: int = 4) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Estimate background from image by analyzing dark regions.
+    
+    Args:
+        img: Input image array
+        preset_indices: Optional pre-calculated indices for background regions
+        window_shape: Shape of windows to analyze (default: 16x16x3)
+        step: Step size for window sliding (default: 4)
+        
+    Returns:
+        Tuple of (background mean values, indices of background regions)
+    """
+    img_windows = view_as_windows(img, window_shape, step)
+    img_windows_flat = np.reshape(img_windows, 
+                                (img_windows.shape[0] * img_windows.shape[1],
+                                 window_shape[0], window_shape[1], window_shape[2]))
+    
+    if preset_indices is None:
+        s_windows = np.sum(img_windows_flat, axis=(1, 2, 3))
+        indices = np.argsort(s_windows)  # ascending order
+        a = int(img_windows_flat.shape[0] * 0.0001)  # 0.01% of windows
+        low_indices = indices[-a:]
+    else:
+        low_indices = preset_indices
+        
+    low_patches = img_windows_flat[low_indices]
+    bg_mean = np.mean(low_patches, axis=(0, 1, 2))
+    
+    return bg_mean, low_indices
 
 @dataclass
 class ImageData:
