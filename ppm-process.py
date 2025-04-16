@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Dict, Tuple, Optional, List
 from pathlib import Path
 import tifffile
+import sys
 
 def estimate_background(img: np.ndarray, 
                        preset_indices: Optional[np.ndarray] = None,
@@ -209,7 +210,8 @@ class PolychromaticPolarizationProcessor:
                     image_pair: PolarizationPair,
                     pos_neg_diff: np.ndarray,
                     neg_pos_diff: np.ndarray,
-                    combined_result: np.ndarray):
+                    combined_result: np.ndarray,
+                    display: bool = False):
         base_name = image_pair.positive.name
         
         tifffile.imwrite(str(self.output_path / f"{base_name}-5.tif"), img_as_ubyte(neg_pos_diff))
@@ -225,6 +227,7 @@ class PolychromaticPolarizationProcessor:
             overlay = np.clip(image_pair.brightfield.data + green, 0, 1)
             tifffile.imwrite(str(self.output_path / f"{base_name}_overlay.tif"), img_as_ubyte(overlay))
             
+            # Create and save the figure
             plt.figure(figsize=(10, 3))
             plt.subplot(121).set_title("Result image")
             plt.imshow(combined_result)
@@ -233,9 +236,17 @@ class PolychromaticPolarizationProcessor:
             plt.imshow(overlay)
             plt.axis('off')
             plt.tight_layout()
-            plt.show()
             
-    def process_images(self, directory: str):
+            # Save the figure
+            plt.savefig(str(self.base_path / f"{base_name}_panels.png"), dpi=75, bbox_inches='tight')
+            
+            # Display only if requested
+            if display:
+                plt.show()
+            else:
+                plt.close()
+            
+    def process_images(self, directory: str, display: bool = False):
         paths = self.set_directory(directory)
         files = self.get_sorted_files(paths)
         
@@ -259,18 +270,57 @@ class PolychromaticPolarizationProcessor:
                 image_pair, bg_pos_mean, bg_neg_mean, scale_pos, scale_neg
             )
             
-            self.save_results(image_pair, pos_neg_diff, neg_pos_diff, combined_result)
+            self.save_results(image_pair, pos_neg_diff, neg_pos_diff, combined_result, display)
             print(f"Result saved for: {image_pair.positive.name}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Process polychromatic polarization microscopy images.')
+    parser = argparse.ArgumentParser(
+        description='Process polychromatic polarization microscopy images.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Process images in the data-sample directory with default gain
+  python ppm-process.py data-sample
+
+  # Process images with custom gain parameter
+  python ppm-process.py data-sample --gain 0.7
+
+  # Process images and display results
+  python ppm-process.py data-sample --display
+
+Directory structure should be:
+  data-sample/
+    ├── +5/         # Positive polarization images
+    ├── -5/         # Negative polarization images
+    ├── bf/         # Brightfield images (optional)
+    └── bg/         # Background images (optional)
+        ├── b+5.tif
+        └── b-5.tif
+"""
+    )
     parser.add_argument('directory', type=str, help='Directory containing the image data')
-    parser.add_argument('--gain', type=float, default=0.6, help='Image gain parameter (default: 0.6)')
-    args = parser.parse_args()
+    parser.add_argument('--gain', type=float, default=0.6, 
+                       help='Image gain parameter (default: 0.6, range: 0.0-1.0)')
+    parser.add_argument('--display', action='store_true',
+                       help='Display results while processing')
     
-    params = ProcessingParameters(gain=args.gain)
-    processor = PolychromaticPolarizationProcessor(params)
-    processor.process_images(args.directory)
+    try:
+        args = parser.parse_args()
+        
+        # Validate gain parameter
+        if not 0.0 <= args.gain <= 1.0:
+            parser.error("Gain must be between 0.0 and 1.0")
+            
+        params = ProcessingParameters(gain=args.gain)
+        processor = PolychromaticPolarizationProcessor(params)
+        processor.process_images(args.directory, args.display)
+        
+    except KeyboardInterrupt:
+        print("\nProcessing interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
