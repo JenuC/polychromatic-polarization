@@ -1,5 +1,5 @@
 [project]
-name = "PPM"
+name = "ppm"
 version = "0.2.0"
 description = "Polychromatic Polarization Microscope"
 readme = "README.md"
@@ -14,3 +14,10 @@ dependencies = [
     "pillow",
     "tifffile"
     ]
+
+[project.scripts]
+ppm = "ppm_process:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

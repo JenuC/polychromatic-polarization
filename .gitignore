@@ -1,3 +1,6 @@
 .vscode
 data-sample/results
 uv.lock
+__pycache__/
+*.pyc
+data-sample/
