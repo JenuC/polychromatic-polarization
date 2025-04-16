@@ -3,8 +3,7 @@ from skimage import io, color, img_as_float, img_as_ubyte, exposure
 from skimage.util.shape import view_as_windows
 import os
 import matplotlib.pyplot as plt
-import tkinter as tk
-from tkinter.filedialog import askdirectory
+import argparse
 from dataclasses import dataclass
 from typing import Dict, Tuple, Optional, List
 from pathlib import Path
@@ -71,12 +70,12 @@ class PolychromaticPolarizationProcessor:
         self.base_path: Optional[Path] = None
         self.output_path: Optional[Path] = None
         
-    def select_directory(self) -> Dict[str, Path]:
-        root = tk.Tk()
-        self.base_path = Path(askdirectory(parent=root, initialdir=os.getcwd(), 
-                                        title='Please select a directory'))
-        root.destroy()
-        
+    def set_directory(self, directory: str) -> Dict[str, Path]:
+        """Set the working directory and create necessary paths."""
+        self.base_path = Path(directory).resolve()
+        if not self.base_path.exists():
+            raise ValueError(f"Directory does not exist: {directory}")
+            
         self.output_path = self.base_path / 'results'
         self.output_path.mkdir(exist_ok=True)
         
@@ -226,17 +225,17 @@ class PolychromaticPolarizationProcessor:
             overlay = np.clip(image_pair.brightfield.data + green, 0, 1)
             tifffile.imwrite(str(self.output_path / f"{base_name}_overlay.tif"), img_as_ubyte(overlay))
             
-            plt.figure(figsize=(40, 20))
-            plt.subplot(211).set_title("Result image")
+            plt.figure(figsize=(20, 10))
+            plt.subplot(121).set_title("Result image")
             plt.imshow(combined_result)
             plt.axis('off')
-            plt.subplot(212).set_title("Overlay image")
+            plt.subplot(122).set_title("Overlay image")
             plt.imshow(overlay)
             plt.axis('off')
             plt.show()
             
-    def process_images(self):
-        paths = self.select_directory()
+    def process_images(self, directory: str):
+        paths = self.set_directory(directory)
         files = self.get_sorted_files(paths)
         
         for pos_path, neg_path, bf_path in zip(files['positive'], files['negative'], files['brightfield']):
@@ -262,6 +261,15 @@ class PolychromaticPolarizationProcessor:
             self.save_results(image_pair, pos_neg_diff, neg_pos_diff, combined_result)
             print(f"Result saved for: {image_pair.positive.name}")
 
+def main():
+    parser = argparse.ArgumentParser(description='Process polychromatic polarization microscopy images.')
+    parser.add_argument('directory', type=str, help='Directory containing the image data')
+    parser.add_argument('--gain', type=float, default=0.6, help='Image gain parameter (default: 0.6)')
+    args = parser.parse_args()
+    
+    params = ProcessingParameters(gain=args.gain)
+    processor = PolychromaticPolarizationProcessor(params)
+    processor.process_images(args.directory)
+
 if __name__ == "__main__":
-    processor = PolychromaticPolarizationProcessor()
-    processor.process_images()
+    main()
