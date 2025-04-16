@@ -225,13 +225,14 @@ class PolychromaticPolarizationProcessor:
             overlay = np.clip(image_pair.brightfield.data + green, 0, 1)
             tifffile.imwrite(str(self.output_path / f"{base_name}_overlay.tif"), img_as_ubyte(overlay))
             
-            plt.figure(figsize=(20, 10))
+            plt.figure(figsize=(10, 3))
             plt.subplot(121).set_title("Result image")
             plt.imshow(combined_result)
             plt.axis('off')
             plt.subplot(122).set_title("Overlay image")
             plt.imshow(overlay)
             plt.axis('off')
+            plt.tight_layout()
             plt.show()
             
     def process_images(self, directory: str):
