@@ -1,3 +1,9 @@
+"""
+Polychromatic Polarization Microscope (PPM) Package
+
+A package for processing polychromatic polarization microscopy images.
+"""
+
 import numpy as np
 from skimage import io, color, img_as_float, img_as_ubyte, exposure
 from skimage.util.shape import view_as_windows
@@ -10,40 +16,6 @@ from pathlib import Path
 import tifffile
 import sys
 
-def estimate_background(img: np.ndarray, 
-                       preset_indices: Optional[np.ndarray] = None,
-                       window_shape: Tuple[int, int, int] = (16, 16, 3),
-                       step: int = 4) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Estimate background from image by analyzing dark regions.
-    
-    Args:
-        img: Input image array
-        preset_indices: Optional pre-calculated indices for background regions
-        window_shape: Shape of windows to analyze (default: 16x16x3)
-        step: Step size for window sliding (default: 4)
-        
-    Returns:
-        Tuple of (background mean values, indices of background regions)
-    """
-    img_windows = view_as_windows(img, window_shape, step)
-    img_windows_flat = np.reshape(img_windows, 
-                                (img_windows.shape[0] * img_windows.shape[1],
-                                 window_shape[0], window_shape[1], window_shape[2]))
-    
-    if preset_indices is None:
-        s_windows = np.sum(img_windows_flat, axis=(1, 2, 3))
-        indices = np.argsort(s_windows)  # ascending order
-        a = int(img_windows_flat.shape[0] * 0.0001)  # 0.01% of windows
-        low_indices = indices[-a:]
-    else:
-        low_indices = preset_indices
-        
-    low_patches = img_windows_flat[low_indices]
-    bg_mean = np.mean(low_patches, axis=(0, 1, 2))
-    
-    return bg_mean, low_indices
-
 @dataclass
 class ImageData:
     """Container for image data and its metadata"""
@@ -53,7 +25,7 @@ class ImageData:
 
 @dataclass
 class PolarizationPair:
-    """Container for paired polarization images"""
+    """Container for a pair of polarization images"""
     positive: ImageData
     negative: ImageData
     brightfield: Optional[ImageData] = None
@@ -70,6 +42,47 @@ class PolychromaticPolarizationProcessor:
         self.params = params or ProcessingParameters()
         self.base_path: Optional[Path] = None
         self.output_path: Optional[Path] = None
+        
+    def estimate_background(self, img: np.ndarray, 
+                          preset_indices: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Estimate background from image by analyzing dark regions.
+        
+        Args:
+            img: Input image array
+            preset_indices: Optional pre-calculated indices for background regions
+            
+        Returns:
+            Tuple of (background mean values, indices of background regions)
+        """
+        if img is None:
+            raise ValueError("Input image cannot be None")
+        if not isinstance(img, np.ndarray):
+            raise ValueError("Input image must be a numpy array")
+        if img.size == 0:
+            raise ValueError("Input image cannot be empty")
+        if len(img.shape) != 3:
+            raise ValueError("Input image must be 3-dimensional (height, width, channels)")
+            
+        img_windows = view_as_windows(img, self.params.window_shape, self.params.step)
+        img_windows_flat = np.reshape(img_windows, 
+                                    (img_windows.shape[0] * img_windows.shape[1],
+                                     self.params.window_shape[0], 
+                                     self.params.window_shape[1], 
+                                     self.params.window_shape[2]))
+        
+        if preset_indices is None:
+            s_windows = np.sum(img_windows_flat, axis=(1, 2, 3))
+            indices = np.argsort(s_windows)  # ascending order
+            a = int(img_windows_flat.shape[0] * 0.0001)  # 0.01% of windows
+            low_indices = indices[-a:]
+        else:
+            low_indices = preset_indices
+            
+        low_patches = img_windows_flat[low_indices]
+        bg_mean = np.mean(low_patches, axis=(0, 1, 2))
+        
+        return bg_mean, low_indices
         
     def set_directory(self, directory: str) -> Dict[str, Path]:
         """Set the working directory and create necessary paths."""
@@ -126,46 +139,16 @@ class PolychromaticPolarizationProcessor:
         return PolarizationPair(positive=pos_img, negative=neg_img)
         
     def process_background(self, image_pair: PolarizationPair) -> Tuple[np.ndarray, np.ndarray, float, float]:
-        pos_sum = np.sum(image_pair.positive.data)
-        neg_sum = np.sum(image_pair.negative.data)
+        """Process background images and calculate scaling factors."""
+        bg_pos_mean, _ = self.estimate_background(image_pair.positive.data)
+        bg_neg_mean, _ = self.estimate_background(image_pair.negative.data)
         
-        if pos_sum > neg_sum:
-            bg_pos_mean, indices = estimate_background(
-                image_pair.positive.data, 
-                window_shape=self.params.window_shape,
-                step=self.params.step
-            )
-            bg_neg_mean, _ = estimate_background(
-                image_pair.negative.data,
-                preset_indices=indices,
-                window_shape=self.params.window_shape,
-                step=self.params.step
-            )
-        else:
-            bg_neg_mean, indices = estimate_background(
-                image_pair.negative.data,
-                window_shape=self.params.window_shape,
-                step=self.params.step
-            )
-            bg_pos_mean, _ = estimate_background(
-                image_pair.positive.data,
-                preset_indices=indices,
-                window_shape=self.params.window_shape,
-                step=self.params.step
-            )
-            
         bg_pos_max = np.max(bg_pos_mean)
         bg_neg_max = np.max(bg_neg_mean)
-        
         scale_pos = max(bg_pos_max, bg_neg_max) / bg_pos_max
         scale_neg = max(bg_pos_max, bg_neg_max) / bg_neg_max
         
-        return (
-            bg_pos_max / bg_pos_mean,
-            bg_neg_max / bg_neg_mean,
-            scale_pos,
-            scale_neg
-        )
+        return bg_pos_mean, bg_neg_mean, scale_pos, scale_neg
         
     def correct_images(self, 
                     image_pair: PolarizationPair,
@@ -205,7 +188,7 @@ class PolychromaticPolarizationProcessor:
             )
             
         return pos_neg_diff, neg_pos_diff, np.clip(pos_neg_diff + neg_pos_diff, 0, 1)
-        
+            
     def save_results(self, 
                     image_pair: PolarizationPair,
                     pos_neg_diff: np.ndarray,

@@ -6,72 +6,55 @@ Polychromatic polarization microscopy is a real-time collagen imaging method in 
 |<img src="https://github.com/uw-loci/polychromatic-polarization/blob/master/thumbnails/brightfield.png" width="320">|<img src="https://github.com/uw-loci/polychromatic-polarization/blob/master/thumbnails/ppm.png" width="320">|
 
 
-# PPP Process
+# PPM Process
 
-A Python package for processing polychromatic polarization measurements, particularly effective for visualizing collagen structures in clinical histopathology.
+A Python package for processing polychromatic polarization microscopy images.
 
 ## Installation
 
 ```bash
-pip install ppp
+pip install ppm-process
 ```
 
 ## Usage
 
-### Command Line Interface
-
-Process images from a directory containing polarization data:
-
-```bash
-# Basic usage with default settings
-ppp data-sample
-
-# Process with custom gain parameter (default: 0.6)
-ppp data-sample --gain 0.7
-
-# Process and display results while processing
-ppp data-sample --display
-```
-
-Directory structure should be:
-```
-data-sample/
-├── +5/         # Positive polarization images
-├── -5/         # Negative polarization images
-├── bf/         # Brightfield images (optional)
-└── bg/         # Background images (optional)
-    ├── b+5.tif
-    └── b-5.tif
-```
-
-### Python API
-
 ```python
-from ppm_process import PolychromaticPolarizationProcessor
-from pathlib import Path
+from ppm_processor import PolychromaticPolarizationProcessor
 
-# Create processor with default settings
+# Create a processor instance
 processor = PolychromaticPolarizationProcessor()
 
-# Process images from a directory
-processor.process_images("data-sample", display=True)
-
-# Or process with custom gain
-from ppm_process import ProcessingParameters
-params = ProcessingParameters(gain=0.7)
-processor = PolychromaticPolarizationProcessor(params)
-processor.process_images("data-sample")
+# Process images
+processor.process_images(
+    input_dir="path/to/input",
+    output_dir="path/to/output",
+    parameters=ProcessingParameters(
+        wavelength=550,  # nm
+        pixel_size=0.1,  # μm
+        numerical_aperture=0.4
+    )
+)
 ```
 
-The processor will:
-1. Load and process the polarization image pairs
-2. Generate PPM results
-3. Save multiple output versions:
-   - Individual +5 and -5 difference images
-   - Combined result image
-   - Color version
-   - Grayscale version
-   - Optional overlay with brightfield image
+## Features
+
+- Process polychromatic polarization microscopy images
+- Support for multiple image formats
+- Configurable processing parameters
+- Efficient batch processing
+- Progress tracking and logging
+
+## Requirements
+
+- Python >= 3.12
+- NumPy
+- SciPy
+- scikit-image
+- tifffile
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Technical Details
 
@@ -138,15 +121,3 @@ The process saves multiple versions of the result:
 - Color version
 - Grayscale version
 - Optional overlay with brightfield image
-
-## Requirements
-
-- Python >= 3.12
-- numpy
-- matplotlib
-- scikit-image
-- tifffile
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details. 

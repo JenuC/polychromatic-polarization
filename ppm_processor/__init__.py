@@ -5,7 +5,13 @@ A package for processing polychromatic polarization microscopy images.
 """
 
 from importlib.metadata import version, PackageNotFoundError
-from .ppm_process import main
+from .ppm_process import (
+    PolychromaticPolarizationProcessor,
+    ProcessingParameters,
+    ImageData,
+    PolarizationPair,
+    main
+)
 
 try:
     __version__ = version("ppm")
