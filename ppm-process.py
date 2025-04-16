@@ -1,93 +1,234 @@
 import numpy as np
+from skimage import io, color, img_as_float, img_as_ubyte, exposure
 from skimage.util.shape import view_as_windows
-from skimage import io, color, img_as_float, img_as_ubyte,exposure
-import glob, os
+import os
 import matplotlib.pyplot as plt
-import tkinter
+import tkinter as tk
 from tkinter.filedialog import askdirectory
 from utils import estimate_background
-import matplotlib.pyplot as plt
-from PIL import Image
+from dataclasses import dataclass
+from typing import Dict, Tuple, Optional, List
+from pathlib import Path
+import tifffile
 
+@dataclass
+class ImageData:
+    """Container for image data and its metadata"""
+    data: np.ndarray
+    path: Path
+    name: str
 
+@dataclass
+class PolarizationPair:
+    """Container for paired polarization images"""
+    positive: ImageData
+    negative: ImageData
+    brightfield: Optional[ImageData] = None
 
-# %%
-def main():
-    ### set path
-    root = tkinter.Tk()
-    dirname = askdirectory(parent=root, initialdir=os.getcwd(),
-                                        title='Please select a directory')
-    dataset_base = dirname
-    bg_path = os.path.join(dataset_base, 'bg')
-    pos_path = os.path.join(dataset_base, '+5')
-    neg_path = os.path.join(dataset_base, '-5')
-    bf_path = os.path.join(dataset_base, 'bf')
-    result_path = os.path.join(dataset_base, 'results')
-    os.makedirs(result_path, exist_ok=True)
-    if not os.path.exists(pos_path) and os.path.exists(neg_path):
-        print('Negative or positive image folders not found')
-    root.destroy()
-    file_pos = [os.path.join(pos_path, f) for f in os.listdir(pos_path)]
-    file_pos.sort()
-    file_neg = [os.path.join(neg_path, f) for f in os.listdir(neg_path)]
-    file_neg.sort()
-    file_bf = [os.path.join(bf_path, f) for f in os.listdir(bf_path)]
-    file_bf.sort()
-    if len(file_neg)==0 or len(file_pos)==0 or len(file_neg)!=len(file_pos):
-        print('Negative or positive images not matched')
+@dataclass
+class ProcessingParameters:
+    """Container for image processing parameters"""
+    gain: float = 0.6
+    window_shape: Tuple[int, int, int] = (16, 16, 3)
+    step: int = 4
 
-
-    # %%
-    for i in range(0, len(file_pos)):
-        img_name = os.path.basename(file_pos[i]).split('.')[0]
-        print(img_name)
-        if os.path.exists(bg_path):
-            img_pos = img_as_float(io.imread(os.path.join(bg_path, 'b+5.tif')))
-            img_neg = img_as_float(io.imread(os.path.join(bg_path, 'b-5.tif')))
+class PolychromaticPolarizationProcessor:
+    def __init__(self, params: ProcessingParameters = None):
+        self.params = params or ProcessingParameters()
+        self.base_path: Optional[Path] = None
+        self.output_path: Optional[Path] = None
+        
+    def select_directory(self) -> Dict[str, Path]:
+        root = tk.Tk()
+        self.base_path = Path(askdirectory(parent=root, initialdir=os.getcwd(), 
+                                        title='Please select a directory'))
+        root.destroy()
+        
+        self.output_path = self.base_path / 'results'
+        self.output_path.mkdir(exist_ok=True)
+        
+        return {
+            'background': self.base_path / 'bg',
+            'positive': self.base_path / '+5',
+            'negative': self.base_path / '-5',
+            'brightfield': self.base_path / 'bf'
+        }
+        
+    def get_sorted_files(self, paths: Dict[str, Path]) -> Dict[str, List[Path]]:
+        files = {
+            'positive': sorted(paths['positive'].glob('*')),
+            'negative': sorted(paths['negative'].glob('*')),
+            'brightfield': sorted(paths['brightfield'].glob('*'))
+        }
+        
+        if not files['positive'] or not files['negative'] or len(files['negative']) != len(files['positive']):
+            raise ValueError('Mismatched positive and negative image pairs')
+            
+        return files
+        
+    def load_image_pair(self, file_paths: Dict[str, Path], bg_path: Optional[Path] = None) -> PolarizationPair:
+        if bg_path and bg_path.exists():
+            pos_img = ImageData(
+                data=img_as_float(io.imread(bg_path / 'b+5.tif')),
+                path=bg_path / 'b+5.tif',
+                name='background_positive'
+            )
+            neg_img = ImageData(
+                data=img_as_float(io.imread(bg_path / 'b-5.tif')),
+                path=bg_path / 'b-5.tif',
+                name='background_negative'
+            )
         else:
-            img_pos = img_as_float(io.imread(file_pos[i]))
-            img_neg = img_as_float(io.imread(file_neg[i]))
-        pos_v = np.concatenate(img_pos).sum()
-        neg_v = np.concatenate(img_neg).sum()
-        if pos_v > neg_v:        
-            bg_pos_mean, indices = estimate_background(img_pos)
-            bg_neg_mean, _ = estimate_background(img_neg, preset_indices=indices)
+            pos_img = ImageData(
+                data=img_as_float(io.imread(file_paths['positive'])),
+                path=file_paths['positive'],
+                name=file_paths['positive'].stem
+            )
+            neg_img = ImageData(
+                data=img_as_float(io.imread(file_paths['negative'])),
+                path=file_paths['negative'],
+                name=file_paths['negative'].stem
+            )
+            
+        return PolarizationPair(positive=pos_img, negative=neg_img)
+        
+    def process_background(self, image_pair: PolarizationPair) -> Tuple[np.ndarray, np.ndarray, float, float]:
+        pos_sum = np.sum(image_pair.positive.data)
+        neg_sum = np.sum(image_pair.negative.data)
+        
+        if pos_sum > neg_sum:
+            bg_pos_mean, indices = estimate_background(
+                image_pair.positive.data, 
+                window_shape=self.params.window_shape,
+                step=self.params.step
+            )
+            bg_neg_mean, _ = estimate_background(
+                image_pair.negative.data,
+                preset_indices=indices,
+                window_shape=self.params.window_shape,
+                step=self.params.step
+            )
         else:
-            bg_neg_mean, indices = estimate_background(img_neg)
-            bg_pos_mean, _ = estimate_background(img_pos, preset_indices=indices)
+            bg_neg_mean, indices = estimate_background(
+                image_pair.negative.data,
+                window_shape=self.params.window_shape,
+                step=self.params.step
+            )
+            bg_pos_mean, _ = estimate_background(
+                image_pair.positive.data,
+                preset_indices=indices,
+                window_shape=self.params.window_shape,
+                step=self.params.step
+            )
+            
         bg_pos_max = np.max(bg_pos_mean)
         bg_neg_max = np.max(bg_neg_mean)
-        a_pos = max(bg_pos_max, bg_neg_max) / bg_pos_max
-        a_neg = max(bg_pos_max, bg_neg_max) / bg_neg_max
-        bg_pos_mean = bg_pos_max / bg_pos_mean
-        bg_neg_mean = bg_neg_max / bg_neg_mean
-        cor_img_pos = np.clip(img_pos * bg_pos_mean * a_pos, 0, 1)
-        cor_img_neg = np.clip(img_neg * bg_neg_mean * a_neg, 0, 1)
-        pos_c_v = np.concatenate(img_pos).mean()
-        neg_c_v = np.concatenate(img_neg).mean()
-        if neg_c_v > pos_c_v:
-            pos_neg = exposure.rescale_intensity(np.clip(cor_img_pos - cor_img_neg, 0, 1), in_range=(0.05, 0.5), out_range=(0, 1)) 
-            neg_pos = exposure.rescale_intensity(np.clip(cor_img_neg - cor_img_pos, 0, 1), in_range=(0.05, 0.5), out_range=(0, 1)) 
-        else: 
-            neg_pos = exposure.rescale_intensity(np.clip(cor_img_neg - cor_img_pos, 0, 1), in_range=(0.05, 0.5), out_range=(0, 1)) 
-            pos_neg = exposure.rescale_intensity(np.clip(cor_img_pos - cor_img_neg, 0, 1), in_range=(0.05, 0.5), out_range=(0, 1)) 
-        result_img = np.clip(pos_neg+neg_pos, 0, 1)
-        io.imsave(os.path.join(result_path, img_name+'-5'+'.tif'), img_as_ubyte(neg_pos))
-        io.imsave(os.path.join(result_path, img_name+'+5'+'.tif'), img_as_ubyte(pos_neg))
-        io.imsave(os.path.join(result_path, img_name+'_result'+'.tif'), img_as_ubyte(result_img))
-        print('Result saved for: '+ img_name)
-        io.imsave(os.path.join(result_path, img_name+'_color.tif'), img_as_ubyte(result_img))
-        gray = np.amax(result_img, 2)
-        io.imsave(os.path.join(result_path, img_name+'_gray.tif'), img_as_ubyte(gray))
-        try:
-            bf_img = img_as_float(io.imread(file_bf[i]))
-            green = np.zeros(bf_img.shape)
+        
+        scale_pos = max(bg_pos_max, bg_neg_max) / bg_pos_max
+        scale_neg = max(bg_pos_max, bg_neg_max) / bg_neg_max
+        
+        return (
+            bg_pos_max / bg_pos_mean,
+            bg_neg_max / bg_neg_mean,
+            scale_pos,
+            scale_neg
+        )
+        
+    def correct_images(self, 
+                    image_pair: PolarizationPair,
+                    bg_pos_mean: np.ndarray,
+                    bg_neg_mean: np.ndarray,
+                    scale_pos: float,
+                    scale_neg: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        corrected_pos = np.clip(image_pair.positive.data * bg_pos_mean * scale_pos, 0, 1)
+        corrected_neg = np.clip(image_pair.negative.data * bg_neg_mean * scale_neg, 0, 1)
+        
+        pos_mean = np.mean(image_pair.positive.data)
+        neg_mean = np.mean(image_pair.negative.data)
+        
+        intensity_range = (0.1 - 0.1*self.params.gain, 1-self.params.gain)
+        
+        if neg_mean > pos_mean:
+            pos_neg_diff = exposure.rescale_intensity(
+                np.clip(corrected_pos - corrected_neg, 0, 1),
+                in_range=intensity_range,
+                out_range=(0, 1)
+            )
+            neg_pos_diff = exposure.rescale_intensity(
+                np.clip(corrected_neg - corrected_pos, 0, 1),
+                in_range=intensity_range,
+                out_range=(0, 1)
+            )
+        else:
+            neg_pos_diff = exposure.rescale_intensity(
+                np.clip(corrected_neg - corrected_pos, 0, 1),
+                in_range=intensity_range,
+                out_range=(0, 1)
+            )
+            pos_neg_diff = exposure.rescale_intensity(
+                np.clip(corrected_pos - corrected_neg, 0, 1),
+                in_range=intensity_range,
+                out_range=(0, 1)
+            )
+            
+        return pos_neg_diff, neg_pos_diff, np.clip(pos_neg_diff + neg_pos_diff, 0, 1)
+        
+    def save_results(self, 
+                    image_pair: PolarizationPair,
+                    pos_neg_diff: np.ndarray,
+                    neg_pos_diff: np.ndarray,
+                    combined_result: np.ndarray):
+        base_name = image_pair.positive.name
+        
+        tifffile.imwrite(str(self.output_path / f"{base_name}-5.tif"), img_as_ubyte(neg_pos_diff))
+        tifffile.imwrite(str(self.output_path / f"{base_name}+5.tif"), img_as_ubyte(pos_neg_diff))
+        tifffile.imwrite(str(self.output_path / f"{base_name}_color.tif"), img_as_ubyte(combined_result))
+        
+        gray = np.amax(combined_result, 2)
+        tifffile.imwrite(str(self.output_path / f"{base_name}_gray.tif"), img_as_ubyte(gray))
+        
+        if image_pair.brightfield is not None:
+            green = np.zeros(image_pair.brightfield.data.shape)
             green[:, :, 1] = gray
-            overlay = np.clip(bf_img + green, 0, 1)
-            io.imsave(os.path.join(result_path, img_name+'_overlay.tif'), img_as_ubyte(overlay))
-        except:
-            print("Brighfield image not provided!")
-            pass
+            overlay = np.clip(image_pair.brightfield.data + green, 0, 1)
+            tifffile.imwrite(str(self.output_path / f"{base_name}_overlay.tif"), img_as_ubyte(overlay))
+            
+            plt.figure(figsize=(40, 20))
+            plt.subplot(211).set_title("Result image")
+            plt.imshow(combined_result)
+            plt.axis('off')
+            plt.subplot(212).set_title("Overlay image")
+            plt.imshow(overlay)
+            plt.axis('off')
+            plt.show()
+            
+    def process_images(self):
+        paths = self.select_directory()
+        files = self.get_sorted_files(paths)
+        
+        for pos_path, neg_path, bf_path in zip(files['positive'], files['negative'], files['brightfield']):
+            image_pair = self.load_image_pair({
+                'positive': pos_path,
+                'negative': neg_path
+            }, paths['background'])
+            
+            if bf_path.exists():
+                image_pair.brightfield = ImageData(
+                    data=img_as_float(io.imread(bf_path)),
+                    path=bf_path,
+                    name=bf_path.stem
+                )
+            
+            print(f"Processing: {image_pair.positive.name}")
+            
+            bg_pos_mean, bg_neg_mean, scale_pos, scale_neg = self.process_background(image_pair)
+            pos_neg_diff, neg_pos_diff, combined_result = self.correct_images(
+                image_pair, bg_pos_mean, bg_neg_mean, scale_pos, scale_neg
+            )
+            
+            self.save_results(image_pair, pos_neg_diff, neg_pos_diff, combined_result)
+            print(f"Result saved for: {image_pair.positive.name}")
 
-if __name__=="__main__":
-    main()
+if __name__ == "__main__":
+    processor = PolychromaticPolarizationProcessor()
+    processor.process_images()
