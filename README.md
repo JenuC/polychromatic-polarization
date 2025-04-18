@@ -46,11 +46,11 @@ processor.process_images(
 
 ## Requirements
 
-- Python >= 3.12
+- Python >= 3.10
 - NumPy
 - SciPy
 - scikit-image
-- tifffile
+- imageio
 
 ## License
 

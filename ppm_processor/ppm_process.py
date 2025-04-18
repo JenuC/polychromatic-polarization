@@ -13,7 +13,7 @@ import argparse
 from dataclasses import dataclass
 from typing import Dict, Tuple, Optional, List
 from pathlib import Path
-import tifffile
+import imageio
 import sys
 
 @dataclass
@@ -197,18 +197,19 @@ class PolychromaticPolarizationProcessor:
                     display: bool = False):
         base_name = image_pair.positive.name
         
-        tifffile.imwrite(str(self.output_path / f"{base_name}-5.tif"), img_as_ubyte(neg_pos_diff))
-        tifffile.imwrite(str(self.output_path / f"{base_name}+5.tif"), img_as_ubyte(pos_neg_diff))
-        tifffile.imwrite(str(self.output_path / f"{base_name}_color.tif"), img_as_ubyte(combined_result))
+        # Use imageio for writing output files
+        imageio.imwrite(str(self.output_path / f"{base_name}-5.tif"), img_as_ubyte(neg_pos_diff))
+        imageio.imwrite(str(self.output_path / f"{base_name}+5.tif"), img_as_ubyte(pos_neg_diff))
+        imageio.imwrite(str(self.output_path / f"{base_name}_color.tif"), img_as_ubyte(combined_result))
         
         gray = np.amax(combined_result, 2)
-        tifffile.imwrite(str(self.output_path / f"{base_name}_gray.tif"), img_as_ubyte(gray))
+        imageio.imwrite(str(self.output_path / f"{base_name}_gray.tif"), img_as_ubyte(gray))
         
         if image_pair.brightfield is not None:
             green = np.zeros(image_pair.brightfield.data.shape)
             green[:, :, 1] = gray
             overlay = np.clip(image_pair.brightfield.data + green, 0, 1)
-            tifffile.imwrite(str(self.output_path / f"{base_name}_overlay.tif"), img_as_ubyte(overlay))
+            imageio.imwrite(str(self.output_path / f"{base_name}_overlay.tif"), img_as_ubyte(overlay))
             
             # Create and save the figure
             plt.figure(figsize=(10, 3))
