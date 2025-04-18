@@ -6,6 +6,7 @@ readme = "README.md"
 authors = [
     {name = "JenuC", email = "jenu.chacko@wisc.edu"},
     {name = "Michael Nelson", email ="msnelson8@wisc.edu"}
+    {name = "Bin Li", email ="bli342@wisc.edu"}
 ]
 dependencies = [  
     "numpy>=1.21.0",
