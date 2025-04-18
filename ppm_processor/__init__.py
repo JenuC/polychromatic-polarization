@@ -12,6 +12,13 @@ from .ppm_process import (
     PolarizationPair,
     main
 )
+from .image_corrections import (
+    flatfield_correction,
+    white_balance,
+    non_uniform_illumination_correction,
+    load_correction_images,
+    apply_corrections
+)
 
 try:
     __version__ = version("ppm")

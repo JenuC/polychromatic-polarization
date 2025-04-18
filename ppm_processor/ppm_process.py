@@ -15,6 +15,12 @@ from typing import Dict, Tuple, Optional, List
 from pathlib import Path
 import imageio
 import sys
+from .image_corrections import (
+    flatfield_correction,
+    white_balance,
+    non_uniform_illumination_correction,
+    load_correction_images
+)
 
 @dataclass
 class ImageData:
@@ -36,6 +42,14 @@ class ProcessingParameters:
     gain: float = 0.6
     window_shape: Tuple[int, int, int] = (16, 16, 3)
     step: int = 4
+    # Image correction parameters
+    apply_flatfield: bool = False
+    apply_white_balance: bool = False
+    white_balance_method: str = "white_patch"
+    apply_non_uniform: bool = False
+    non_uniform_method: str = "polynomial"
+    flatfield_path: Optional[Path] = None
+    dark_current_path: Optional[Path] = None
 
 class PolychromaticPolarizationProcessor:
     def __init__(self, params: ProcessingParameters = None):
@@ -156,11 +170,40 @@ class PolychromaticPolarizationProcessor:
                     bg_neg_mean: np.ndarray,
                     scale_pos: float,
                     scale_neg: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        # Apply initial corrections
         corrected_pos = np.clip(image_pair.positive.data * bg_pos_mean * scale_pos, 0, 1)
         corrected_neg = np.clip(image_pair.negative.data * bg_neg_mean * scale_neg, 0, 1)
         
-        pos_mean = np.mean(image_pair.positive.data)
-        neg_mean = np.mean(image_pair.negative.data)
+        # Load correction images if paths are provided
+        flatfield = None
+        dark_current = None
+        if self.params.flatfield_path or self.params.dark_current_path:
+            flatfield, dark_current = load_correction_images(
+                self.params.flatfield_path,
+                self.params.dark_current_path
+            )
+        
+        # Apply image corrections
+        if self.params.apply_flatfield and flatfield is not None:
+            corrected_pos = flatfield_correction(corrected_pos, flatfield, dark_current)
+            corrected_neg = flatfield_correction(corrected_neg, flatfield, dark_current)
+        
+        if self.params.apply_white_balance:
+            corrected_pos = white_balance(corrected_pos, method=self.params.white_balance_method)
+            corrected_neg = white_balance(corrected_neg, method=self.params.white_balance_method)
+        
+        if self.params.apply_non_uniform:
+            corrected_pos = non_uniform_illumination_correction(
+                corrected_pos, 
+                method=self.params.non_uniform_method
+            )
+            corrected_neg = non_uniform_illumination_correction(
+                corrected_neg, 
+                method=self.params.non_uniform_method
+            )
+        
+        pos_mean = np.mean(corrected_pos)
+        neg_mean = np.mean(corrected_neg)
         
         intensity_range = (0.1 - 0.1*self.params.gain, 1-self.params.gain)
         
@@ -263,7 +306,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process images in the data-sample directory with default gain
+  # Process images in the data-sample directory with default settings
   python ppm-process.py data-sample
 
   # Process images with custom gain parameter
@@ -271,6 +314,9 @@ Examples:
 
   # Process images and display results
   python ppm-process.py data-sample --display
+
+  # Process images with flatfield and white balance corrections
+  python ppm-process.py data-sample --flatfield --white-balance
 
 Directory structure should be:
   data-sample/
@@ -288,6 +334,12 @@ Directory structure should be:
     parser.add_argument('--display', action='store_true',
                        help='Display results while processing')
     
+    # Simplified image correction arguments
+    parser.add_argument('--flatfield', action='store_true',
+                       help='Enable flatfield correction')
+    parser.add_argument('--white-balance', action='store_true',
+                       help='Enable white balancing')
+    
     try:
         args = parser.parse_args()
         
@@ -295,7 +347,13 @@ Directory structure should be:
         if not 0.0 <= args.gain <= 1.0:
             parser.error("Gain must be between 0.0 and 1.0")
             
-        params = ProcessingParameters(gain=args.gain)
+        # Create processing parameters with simplified options
+        params = ProcessingParameters(
+            gain=args.gain,
+            apply_flatfield=args.flatfield,
+            apply_white_balance=args.white_balance
+        )
+        
         processor = PolychromaticPolarizationProcessor(params)
         processor.process_images(args.directory, args.display)
         
